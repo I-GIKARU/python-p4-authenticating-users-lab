@@ -13,45 +13,76 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.json.compact = False
 
 migrate = Migrate(app, db)
-
 db.init_app(app)
-
 api = Api(app)
 
-class ClearSession(Resource):
 
+# -------------------- ROUTES --------------------
+
+class ClearSession(Resource):
     def delete(self):
-    
         session['page_views'] = None
         session['user_id'] = None
-
         return {}, 204
 
+
 class IndexArticle(Resource):
-    
     def get(self):
         articles = [article.to_dict() for article in Article.query.all()]
-        return articles, 200
+        return make_response(jsonify(articles), 200)
+
 
 class ShowArticle(Resource):
-
     def get(self, id):
-        session['page_views'] = 0 if not session.get('page_views') else session.get('page_views')
-        session['page_views'] += 1
+        session['page_views'] = session.get('page_views', 0) + 1
 
-        if session['page_views'] <= 3:
+        if session['page_views'] > 3:
+            return {'message': 'Maximum pageview limit reached'}, 401
 
-            article = Article.query.filter(Article.id == id).first()
-            article_json = jsonify(article.to_dict())
+        article = db.session.get(Article, id)
+        if article:
+            return make_response(jsonify(article.to_dict()), 200)
+        return {'message': 'Article not found'}, 404
 
-            return make_response(article_json, 200)
 
-        return {'message': 'Maximum pageview limit reached'}, 401
+class Login(Resource):
+    def post(self):
+        username = request.get_json().get('username')
+        user = User.query.filter_by(username=username).first()
+
+        if user:
+            session['user_id'] = user.id
+            return make_response(jsonify(user.to_dict()), 200)
+        return {'error': 'Unauthorized'}, 401
+
+
+class Logout(Resource):
+    def delete(self):
+        session['user_id'] = None
+        return {}, 204
+
+
+class CheckSession(Resource):
+    def get(self):
+        user_id = session.get('user_id')
+        if user_id:
+            user = db.session.get(User, user_id)
+            if user:
+                return make_response(jsonify(user.to_dict()), 200)
+        return {}, 401
+
+
+# -------------------- RESOURCE ROUTES --------------------
 
 api.add_resource(ClearSession, '/clear')
 api.add_resource(IndexArticle, '/articles')
 api.add_resource(ShowArticle, '/articles/<int:id>')
+api.add_resource(Login, '/login')
+api.add_resource(Logout, '/logout')
+api.add_resource(CheckSession, '/check_session')
 
+
+# -------------------- MAIN --------------------
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
